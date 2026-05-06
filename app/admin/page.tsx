@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -14,6 +14,7 @@ import {
 import { motion } from 'framer-motion'
 import Spinner from '@/components/Spinner'
 import { useToast } from '@/components/Toast'
+import { getGameState, getXPLevel } from '@/lib/gamification'
 
 interface SessionRow {
   id: string
@@ -57,6 +58,7 @@ export default function AdminPage() {
   const [sessions, setSessions] = useState<SessionRow[]>([])
   const [loading, setLoading] = useState(true)
   const [hasUser, setHasUser] = useState(true)
+  const [xpSnap, setXpSnap] = useState<{ totalXP: number; label: string } | null>(null)
 
   const load = (id: string) => {
     setLoading(true)
@@ -64,7 +66,11 @@ export default function AdminPage() {
       .then((r) => r.json())
       .then((d) => setSessions(d?.sessions || []))
       .catch(() => setSessions([]))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        setLoading(false)
+        const gs = getGameState()
+        setXpSnap({ totalXP: gs.totalXP, label: getXPLevel(gs.totalXP).label })
+      })
   }
 
   useEffect(() => {
@@ -100,6 +106,15 @@ export default function AdminPage() {
       n: i + 1,
       level: s.end_level ?? s.start_level,
     }))
+
+  const xpChartData = useMemo(
+    () =>
+      getGameState().xpHistory.map((p) => ({
+        n: p.sessionNumber,
+        xp: p.totalXP,
+      })),
+    [sessions]
+  )
 
   const handleClear = async () => {
     if (!userId) return
@@ -178,11 +193,17 @@ export default function AdminPage() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               <StatCard label="Sessions" value={`${totalSessions}`} />
               <StatCard label="Questions" value={`${totalQuestions}`} accent />
               <StatCard label="Best Level" value={`${bestLevel}`} />
               <StatCard label="Avg. Accuracy" value={`${avgAccuracy}%`} />
+              <StatCard
+                label="Total XP"
+                value={xpSnap ? `${xpSnap.totalXP}` : '—'}
+                accent
+              />
+              <StatCard label="Title" value={xpSnap?.label ?? '—'} />
             </div>
 
             <div className="card p-6">
@@ -219,6 +240,45 @@ export default function AdminPage() {
                     />
                   </LineChart>
                 </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="card p-6">
+              <h2 className="text-xl font-bold mb-4">XP Progress</h2>
+              <div className="h-64">
+                {xpChartData.length === 0 ? (
+                  <p className="text-sm text-[#5D3A1A]">
+                    Finish sessions to record cumulative XP locally — your XP curve will appear here.
+                  </p>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={xpChartData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#F5E6D0" />
+                      <XAxis
+                        dataKey="n"
+                        stroke="#5D3A1A"
+                        tick={{ fontSize: 12 }}
+                        label={{ value: 'Session #', position: 'insideBottom', offset: -2, fill: '#8D6E63' }}
+                      />
+                      <YAxis stroke="#5D3A1A" tick={{ fontSize: 12 }} />
+                      <Tooltip
+                        contentStyle={{
+                          background: 'white',
+                          border: '1px solid #F5E6D0',
+                          borderRadius: 12,
+                        }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="xp"
+                        stroke="#FFB300"
+                        strokeWidth={3}
+                        dot={{ fill: '#FFB300', r: 4 }}
+                        activeDot={{ r: 6 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
 

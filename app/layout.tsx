@@ -15,7 +15,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-bg text-text-1">
+      <body className="bg-bg text-text-1 min-w-0 overflow-x-hidden">
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

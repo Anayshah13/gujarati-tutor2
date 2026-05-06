@@ -24,8 +24,16 @@ import {
   initLevelState,
   processAnswer,
   type LevelState,
+  type SkillScores,
   type SkillKey,
 } from '@/lib/adaptiveEngine'
+import {
+  awardXP,
+  getGameState,
+  getXPLevel,
+  recordAnswer,
+  updateStreak,
+} from '@/lib/gamification'
 import { scorePronunciation, stopSpeaking } from '@/lib/speech'
 import {
   getQuestionByLevelAndType,
@@ -80,6 +88,13 @@ export default function QuizPage() {
 
   const askedTypesThisLevel = useRef<SkillKey[]>([])
   const usedQuestionIds = useRef<string[]>([])
+  const skillsStartRef = useRef<SkillScores | null>(null)
+  const titleLevelStartRef = useRef(0)
+
+  const [combo, setCombo] = useState(0)
+  const comboRef = useRef(0)
+  const [sessionXp, setSessionXp] = useState(0)
+  const [xpToast, setXpToast] = useState<number | null>(null)
 
   // ---- Bootstrap ----
   useEffect(() => {
@@ -112,6 +127,18 @@ export default function QuizPage() {
           blanks: u.skill_blanks ?? 50,
         }
         setLevelState(initialState)
+
+        if (typeof window !== 'undefined') {
+          updateStreak()
+          titleLevelStartRef.current = getXPLevel(getGameState().totalXP).level
+          skillsStartRef.current = {
+            theory: u.skill_theory ?? 50,
+            pronunciation: u.skill_pronunciation ?? 50,
+            sentence: u.skill_sentence ?? 50,
+            translation: u.skill_translation ?? 50,
+            blanks: u.skill_blanks ?? 50,
+          }
+        }
 
         fetch('/api/sessions/start', {
           method: 'POST',
@@ -196,6 +223,21 @@ export default function QuizPage() {
 
       setScoreDelta(correct ? +10 : -5)
       setTimeout(() => setScoreDelta(null), 800)
+
+      if (correct) {
+        const newCombo = comboRef.current + 1
+        comboRef.current = newCombo
+        const xpEarned = awardXP(true, newCombo)
+        recordAnswer(true, xpEarned)
+        setSessionXp((sx) => sx + xpEarned)
+        setXpToast(xpEarned)
+        setCombo(newCombo)
+        window.setTimeout(() => setXpToast(null), 1400)
+      } else {
+        recordAnswer(false, 0)
+        comboRef.current = 0
+        setCombo(0)
+      }
 
       // Detect rescue mode just activated
       if (!prevState.skillRescueMode && newState.skillRescueMode) {
@@ -318,6 +360,7 @@ export default function QuizPage() {
     persistUserState(levelState)
 
     if (typeof window !== 'undefined') {
+      sessionStorage.setItem('gujgyani_finalize_gamification', '1')
       localStorage.setItem(
         'gujgyani_lastSession',
         JSON.stringify({
@@ -325,7 +368,10 @@ export default function QuizPage() {
           startLevel: startLevel.current,
           endLevel: levelState.currentLevel,
           skills: levelState.skills,
+          skillsStart: skillsStartRef.current,
           durationSeconds: duration,
+          xpEarnedSession: sessionXp,
+          titleLevelStart: titleLevelStartRef.current,
         })
       )
     }
@@ -358,6 +404,9 @@ export default function QuizPage() {
 
           <div className="flex items-center gap-4 md:gap-8">
             <LevelDisplay level={levelState.currentLevel} scoreDelta={scoreDelta} />
+            <span className="text-[11px] font-semibold text-[#8D6E63] tabular-nums whitespace-nowrap sm:text-xs">
+              ⭐ {sessionXp} XP
+            </span>
             <div className="hidden sm:block w-32 md:w-48">
               <div className="text-[10px] uppercase tracking-widest text-[#8D6E63] font-semibold mb-1">
                 Score · {levelState.score}/50+
@@ -392,7 +441,30 @@ export default function QuizPage() {
       </header>
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 md:px-6 py-6 grid lg:grid-cols-[1fr_280px] gap-6">
-        <div className="min-h-[60vh]">
+        <div className="relative min-h-[60vh]">
+          <AnimatePresence>
+            {xpToast !== null && (
+              <motion.div
+                key={xpToast}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 6 }}
+                className="pointer-events-none absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-full bg-[#FFB300]/95 px-4 py-2 text-sm font-bold text-[#1A0A00] shadow-lg"
+              >
+                +{xpToast} XP
+              </motion.div>
+            )}
+          </AnimatePresence>
+          {combo >= 3 && (
+            <motion.div
+              key={combo}
+              initial={{ scale: 0.75, opacity: 0 }}
+              animate={{ scale: [1.15, 1], opacity: 1 }}
+              className="absolute right-2 top-2 z-20 rounded-full bg-white/95 px-3 py-1 text-sm font-extrabold text-[#FF6B00] shadow-md md:right-4"
+            >
+              🔥 {combo}x
+            </motion.div>
+          )}
           <AnimatePresence mode="wait">
             {loadingNext ? (
               <motion.div

@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 import Spinner from '@/components/Spinner'
 import type { SkillScores, SkillKey } from '@/lib/adaptiveEngine'
+import { endSession, getGameState, getXPLevel, type GameState } from '@/lib/gamification'
 
 interface LastSession {
   sessionId: string | null
@@ -23,6 +24,9 @@ interface LastSession {
   endLevel: number
   skills: SkillScores
   durationSeconds: number
+  skillsStart?: SkillScores | null
+  xpEarnedSession?: number
+  titleLevelStart?: number
 }
 
 interface SessionSummary {
@@ -37,6 +41,22 @@ const SKILL_COLORS: Record<SkillKey, string> = {
   sentence: '#2E7D32',
   translation: '#7B1FA2',
   blanks: '#FF8F00',
+}
+
+const SKILL_LABEL: Record<SkillKey, string> = {
+  theory: 'Theory',
+  pronunciation: 'Pronunciation',
+  sentence: 'Sentence',
+  translation: 'Translation',
+  blanks: 'Fill blanks',
+}
+
+const SKILL_ICON: Record<SkillKey, string> = {
+  theory: '🎯',
+  pronunciation: '🎤',
+  sentence: '🧩',
+  translation: '🔗',
+  blanks: '✏️',
 }
 
 const FALLBACK_TIPS: Record<SkillKey, string> = {
@@ -58,12 +78,32 @@ const formatDuration = (sec: number): string => {
   return `${m}m ${s}s`
 }
 
+function AnimatedXP({ value }: { value: number }) {
+  const [display, setDisplay] = useState(0)
+  useEffect(() => {
+    const start = performance.now()
+    const duration = 950
+    let frame: number
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      setDisplay(Math.round(value * eased))
+      if (t < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [value])
+  return <span className="tabular-nums">{display}</span>
+}
+
 export default function SummaryPage() {
   const router = useRouter()
   const [last, setLast] = useState<LastSession | null>(null)
   const [serverSession, setServerSession] = useState<SessionSummary | null>(null)
   const [insight, setInsight] = useState<string | null>(null)
   const [insightLoading, setInsightLoading] = useState(true)
+  const [gameSnap, setGameSnap] = useState<GameState | null>(null)
+  const ranFx = useRef(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -84,6 +124,13 @@ export default function SummaryPage() {
     }
     setLast(data)
 
+    if (!ranFx.current && sessionStorage.getItem('gujgyani_finalize_gamification')) {
+      ranFx.current = true
+      sessionStorage.removeItem('gujgyani_finalize_gamification')
+      endSession()
+    }
+    setGameSnap(getGameState())
+
     if (data.sessionId) {
       const userId = localStorage.getItem('gujgyani_userId')
       if (userId) {
@@ -101,7 +148,6 @@ export default function SummaryPage() {
       }
     }
 
-    // Find weakest skill
     const weakest = (Object.entries(data.skills) as [SkillKey, number][]).sort(
       ([, a], [, b]) => a - b
     )[0]?.[0] as SkillKey
@@ -126,7 +172,12 @@ export default function SummaryPage() {
       .finally(() => setInsightLoading(false))
   }, [router])
 
-  if (!last) {
+  const xpMeta = useMemo(() => {
+    if (!gameSnap) return null
+    return getXPLevel(gameSnap.totalXP)
+  }, [gameSnap])
+
+  if (!last || !gameSnap || !xpMeta) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Spinner size={40} />
@@ -138,13 +189,22 @@ export default function SummaryPage() {
   const correct = serverSession?.correct_answers ?? 0
   const accuracy = totalQ > 0 ? Math.round((correct / totalQ) * 100) : 0
 
-  const chartData = (Object.entries(last.skills) as [SkillKey, number][]).map(
-    ([k, v]) => ({ name: k.charAt(0).toUpperCase() + k.slice(1), value: v, key: k })
-  )
+  const xpEarned = last.xpEarnedSession ?? 0
+  const titleStart = last.titleLevelStart ?? 0
+  const titleLeveledUp = xpMeta.level > titleStart
+
+  const skillRows = (Object.keys(last.skills) as SkillKey[]).map((k) => {
+    const end = last.skills[k]
+    const start = last.skillsStart?.[k] ?? end
+    const delta = Math.round(end - start)
+    return { key: k, end, delta }
+  })
+
+  const streak = gameSnap.streak
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <nav className="px-6 py-4 border-b border-[#F5E6D0]">
+    <div className="min-h-screen flex flex-col bg-[#FFF8F0]">
+      <nav className="px-6 py-4 border-b border-[#F5E6D0] bg-[#FFF8F0]/90 backdrop-blur-sm">
         <Link href="/" className="font-extrabold text-xl text-[#FF6B00] flex items-center gap-2 w-fit">
           <span className="gujarati !text-[1.3rem]">ગ</span>
           <span>Guj-Gyani</span>
@@ -158,7 +218,7 @@ export default function SummaryPage() {
           transition={{ duration: 0.5 }}
           className="text-center"
         >
-          <div className="text-5xl mb-3">🎯</div>
+          <div className="text-5xl mb-2">🎯</div>
           <h1 className="text-3xl md:text-4xl font-extrabold mb-2">
             Session Complete
           </h1>
@@ -168,6 +228,84 @@ export default function SummaryPage() {
         <motion.div
           initial={{ opacity: 0, scale: 0.97 }}
           animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.08, duration: 0.45 }}
+          className="rounded-2xl bg-gradient-to-br from-[#FF6B00] to-[#FFB300] p-[1px] shadow-xl"
+        >
+          <div className="rounded-2xl bg-gradient-to-br from-[#FF6B00] to-[#FFB300] px-6 py-8 text-center text-white">
+            <div className="text-xs font-bold uppercase tracking-widest text-white/90 mb-2">
+              XP earned this session
+            </div>
+            <div className="text-5xl font-extrabold tabular-nums">
+              +<AnimatedXP value={xpEarned} /> XP
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12 }}
+          className="card p-6 md:p-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="text-xs uppercase tracking-widest text-[#8D6E63] font-bold mb-1">
+              Knowledge title
+            </div>
+            <div className="text-2xl md:text-3xl font-extrabold text-[#1A0A00]">
+              You are a <span className="text-[#FF6B00]">{xpMeta.label}</span>
+            </div>
+            {titleLeveledUp && (
+              <motion.p
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-2 font-semibold text-[#2E7D32]"
+              >
+                🎉 New title unlocked!
+              </motion.p>
+            )}
+          </div>
+          <div className="text-sm font-semibold text-[#5D3A1A] shrink-0">
+            Next milestone: <span className="text-[#FF6B00]">{xpMeta.nextAt} XP</span>
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.14 }}
+          className="card p-6 md:p-8"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-[#8D6E63] font-bold mb-1">
+                Streak
+              </div>
+              <div className="text-3xl font-extrabold text-[#FF6B00]">
+                🔥 {streak} day streak
+              </div>
+              {streak >= 3 && (
+                <p className="mt-2 text-sm font-semibold text-[#5D3A1A]">
+                  Keep it up! Come back tomorrow
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {Array.from({ length: 7 }).map((_, i) => (
+                <div key={i} className="flex flex-col items-center gap-1">
+                  <span
+                    className={`h-3 w-3 rounded-full ${
+                      i < Math.min(streak, 7) ? 'bg-[#FF6B00]' : 'bg-[#F5E6D0]'
+                    }`}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.5 }}
           className="card p-6 md:p-8 flex flex-col items-center"
         >
@@ -201,16 +339,47 @@ export default function SummaryPage() {
         </div>
 
         <div className="card p-6 md:p-8">
-          <h2 className="text-xl font-bold mb-4">Skill scores</h2>
-          <div className="h-64">
+          <h2 className="text-xl font-bold mb-5">Skill summary</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {skillRows.map(({ key, end, delta }) => (
+              <div
+                key={key}
+                className="flex items-center gap-3 rounded-xl border border-[#F5E6D0] bg-white px-4 py-3"
+              >
+                <span className="text-xl">{SKILL_ICON[key]}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-[#1A0A00]">{SKILL_LABEL[key]}</span>
+                    <span className="font-extrabold tabular-nums text-[#1A0A00]">{end}</span>
+                  </div>
+                  <div
+                    className={`text-xs font-bold tabular-nums ${
+                      delta > 0 ? 'text-[#2E7D32]' : delta < 0 ? 'text-[#C62828]' : 'text-[#8D6E63]'
+                    }`}
+                  >
+                    {delta > 0 ? `+${delta}` : delta === 0 ? '±0' : `${delta}`}
+                  </div>
+                </div>
+                <div
+                  className="h-10 w-1.5 rounded-full"
+                  style={{ background: SKILL_COLORS[key] }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 h-48">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
-                data={chartData}
+                data={skillRows.map(({ key, end }) => ({
+                  name: SKILL_LABEL[key],
+                  value: end,
+                  key,
+                }))}
                 margin={{ top: 10, right: 10, left: -10, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#F5E6D0" />
-                <XAxis dataKey="name" stroke="#5D3A1A" tick={{ fontSize: 12 }} />
-                <YAxis domain={[0, 100]} stroke="#5D3A1A" tick={{ fontSize: 12 }} />
+                <XAxis dataKey="name" stroke="#5D3A1A" tick={{ fontSize: 11 }} />
+                <YAxis domain={[0, 100]} stroke="#5D3A1A" tick={{ fontSize: 11 }} />
                 <Tooltip
                   contentStyle={{
                     background: 'white',
@@ -220,8 +389,8 @@ export default function SummaryPage() {
                   cursor={{ fill: '#FFF3E0' }}
                 />
                 <Bar dataKey="value" radius={[8, 8, 0, 0]}>
-                  {chartData.map((d) => (
-                    <Cell key={d.key} fill={SKILL_COLORS[d.key]} />
+                  {skillRows.map(({ key }) => (
+                    <Cell key={key} fill={SKILL_COLORS[key]} />
                   ))}
                 </Bar>
               </BarChart>
