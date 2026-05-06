@@ -1,6 +1,6 @@
 'use client'
 
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { useEffect, useMemo, useState } from 'react'
 import type { TranslationPair } from '@/data/types'
 
@@ -28,7 +28,15 @@ const shuffle = <T,>(arr: T[]): T[] => {
   return a
 }
 
+const columnVariants = {
+  hidden: {},
+  visible: {
+    transition: { staggerChildren: 0.06, delayChildren: 0.06 },
+  },
+}
+
 export default function MatchColumns({ pairs, onComplete, disabled }: Props) {
+  const reduceMotion = useReducedMotion()
   const englishList = useMemo(() => shuffle(pairs.map((p) => p.english)), [pairs])
   const gujaratiList = useMemo(
     () => shuffle(pairs.map((p) => p.gujarati)),
@@ -110,9 +118,17 @@ export default function MatchColumns({ pairs, onComplete, disabled }: Props) {
     return 'border-[#F5E6D0] bg-white hover:border-[#FF6B00]'
   }
 
+  const rowFromLeft = reduceMotion ? 0 : -6
+  const rowFromRight = reduceMotion ? 0 : 6
+
   return (
     <div className="grid grid-cols-2 gap-3">
-      <div className="space-y-2">
+      <motion.div
+        className="space-y-2"
+        variants={columnVariants}
+        initial="hidden"
+        animate="visible"
+      >
         <div className="text-xs font-semibold text-[#8D6E63] uppercase tracking-wider mb-1">
           English
         </div>
@@ -124,10 +140,20 @@ export default function MatchColumns({ pairs, onComplete, disabled }: Props) {
             <motion.button
               key={eng}
               type="button"
+              variants={{
+                hidden: { opacity: 0, x: rowFromLeft },
+                visible: {
+                  opacity: 1,
+                  x: 0,
+                  transition: { type: 'spring', stiffness: 380, damping: 28 },
+                },
+              }}
               onClick={() => handleEng(eng)}
               whileHover={!matched ? { scale: 1.02 } : undefined}
               whileTap={!matched ? { scale: 0.98 } : undefined}
-              animate={wrong ? { x: [0, -6, 6, -4, 4, 0] } : undefined}
+              animate={
+                wrong ? { x: [0, -6, 6, -4, 4, 0] } : ('visible' as const)
+              }
               transition={{ duration: 0.4 }}
               className={`w-full text-left px-4 py-3 rounded-xl border-2 font-semibold transition-colors ${tileClass(
                 matched,
@@ -140,8 +166,13 @@ export default function MatchColumns({ pairs, onComplete, disabled }: Props) {
             </motion.button>
           )
         })}
-      </div>
-      <div className="space-y-2">
+      </motion.div>
+      <motion.div
+        className="space-y-2"
+        variants={columnVariants}
+        initial="hidden"
+        animate="visible"
+      >
         <div className="text-xs font-semibold text-[#8D6E63] uppercase tracking-wider mb-1">
           ગુજરાતી
         </div>
@@ -153,10 +184,20 @@ export default function MatchColumns({ pairs, onComplete, disabled }: Props) {
             <motion.button
               key={guj}
               type="button"
+              variants={{
+                hidden: { opacity: 0, x: rowFromRight },
+                visible: {
+                  opacity: 1,
+                  x: 0,
+                  transition: { type: 'spring', stiffness: 380, damping: 28 },
+                },
+              }}
               onClick={() => handleGuj(guj)}
               whileHover={!matched ? { scale: 1.02 } : undefined}
               whileTap={!matched ? { scale: 0.98 } : undefined}
-              animate={wrong ? { x: [0, -6, 6, -4, 4, 0] } : undefined}
+              animate={
+                wrong ? { x: [0, -6, 6, -4, 4, 0] } : ('visible' as const)
+              }
               transition={{ duration: 0.4 }}
               className={`gujarati w-full text-right px-4 py-3 rounded-xl border-2 transition-colors ${tileClass(
                 matched,
@@ -169,7 +210,7 @@ export default function MatchColumns({ pairs, onComplete, disabled }: Props) {
             </motion.button>
           )
         })}
-      </div>
+      </motion.div>
     </div>
   )
 }

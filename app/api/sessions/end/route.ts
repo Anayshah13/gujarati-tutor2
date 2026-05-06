@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { assertSessionMatchesUser } from '@/lib/authGate'
 import { getDb } from '@/lib/db'
 
 interface SessionRow {
@@ -18,6 +19,16 @@ export async function POST(req: NextRequest) {
     }
 
     const db = getDb()
+    const owner = db
+      .prepare(`SELECT user_id FROM sessions WHERE id = ?`)
+      .get(sessionId) as { user_id: string } | undefined
+    if (!owner) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+    }
+    if (!assertSessionMatchesUser(req, owner.user_id)) {
+      return NextResponse.json({ error: 'Not authorized.' }, { status: 401 })
+    }
+
     const session = db
       .prepare(
         `SELECT total_questions, correct_answers FROM sessions WHERE id = ?`

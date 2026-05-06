@@ -9,8 +9,6 @@ export interface GameState {
   xpHistory: { sessionNumber: number; totalXP: number }[]
 }
 
-const STORAGE_KEY = 'gujgyani_game'
-
 const defaultState: GameState = {
   xp: 0,
   totalXP: 0,
@@ -22,9 +20,43 @@ const defaultState: GameState = {
   xpHistory: [],
 }
 
+function gameStorageKey(): string {
+  if (typeof window === 'undefined') return 'gujgyani_game'
+  const uid = localStorage.getItem('gujgyani_userId')
+  return uid ? `gujgyani_game_${uid}` : 'gujgyani_game'
+}
+
+function streakStorageKey(): string {
+  if (typeof window === 'undefined') return 'gujgyani_streak'
+  const uid = localStorage.getItem('gujgyani_userId')
+  return uid ? `gujgyani_streak_${uid}` : 'gujgyani_streak'
+}
+
+/** Navbar / landing streak badge (per logged-in user). */
+export function readStreakBadge(): number {
+  if (typeof window === 'undefined') return 0
+  const v = parseInt(localStorage.getItem(streakStorageKey()) || '0', 10)
+  return Number.isFinite(v) ? v : 0
+}
+
+/** Copy legacy global keys into per-user keys once after login/register */
+export function migrateLegacyGamificationToUser(userId: string): void {
+  if (typeof window === 'undefined' || !userId) return
+  const keyedGame = `gujgyani_game_${userId}`
+  const legacyGame = localStorage.getItem('gujgyani_game')
+  if (legacyGame && !localStorage.getItem(keyedGame)) {
+    localStorage.setItem(keyedGame, legacyGame)
+  }
+  const keyedStreak = `gujgyani_streak_${userId}`
+  const legacyStreak = localStorage.getItem('gujgyani_streak')
+  if (legacyStreak != null && localStorage.getItem(keyedStreak) == null) {
+    localStorage.setItem(keyedStreak, legacyStreak)
+  }
+}
+
 export const getGameState = (): GameState => {
   if (typeof window === 'undefined') return defaultState
-  const data = localStorage.getItem(STORAGE_KEY)
+  const data = localStorage.getItem(gameStorageKey())
   if (!data) return defaultState
   try {
     const parsed = JSON.parse(data) as Partial<GameState>
@@ -104,8 +136,8 @@ export const endSession = (): void => {
 
 const saveGameState = (state: GameState): void => {
   if (typeof window === 'undefined') return
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  localStorage.setItem('gujgyani_streak', String(state.streak))
+  localStorage.setItem(gameStorageKey(), JSON.stringify(state))
+  localStorage.setItem(streakStorageKey(), String(state.streak))
 }
 
 export const getXPLevel = (

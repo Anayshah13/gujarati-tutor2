@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { assertSessionMatchesUser } from '@/lib/authGate'
 import { getDb } from '@/lib/db'
 
 interface AnswerPayload {
@@ -25,6 +26,16 @@ export async function POST(req: NextRequest) {
     }
 
     const db = getDb()
+
+    const sess = db
+      .prepare(`SELECT user_id FROM sessions WHERE id = ?`)
+      .get(p.sessionId) as { user_id: string } | undefined
+    if (!sess || sess.user_id !== p.userId) {
+      return NextResponse.json({ error: 'Invalid session' }, { status: 400 })
+    }
+    if (!assertSessionMatchesUser(req, p.userId)) {
+      return NextResponse.json({ error: 'Not authorized.' }, { status: 401 })
+    }
 
     db.prepare(
       `INSERT INTO answers (

@@ -1,8 +1,14 @@
 'use client'
 
-import { motion, useMotionValueEvent, useScroll } from 'framer-motion'
+import {
+  motion,
+  useInView,
+  useMotionValueEvent,
+  useScroll,
+} from 'framer-motion'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { readStreakBadge } from '@/lib/gamification'
 
 const BANDS = [
   {
@@ -51,6 +57,52 @@ const FEATURES = [
 
 const SKILL_CHIPS = ['Theory', 'Pronunciation', 'Sentence', 'Translation', 'Fill blanks']
 
+const SCORECARD: {
+  label: string
+  emoji: string
+  score: number
+  color: string
+  hint: string
+}[] = [
+  { label: 'Online Forums', emoji: '💬', score: 28, color: '#9E9E9E', hint: 'Hours waiting for replies' },
+  { label: 'YouTube',       emoji: '▶️', score: 38, color: '#E53935', hint: 'No idea if you’re right' },
+  { label: 'AI Chatbot',    emoji: '🤖', score: 55, color: '#5C6BC0', hint: 'Forgets where you are' },
+  { label: 'Offline Tuition', emoji: '🏫', score: 67, color: '#8D6E63', hint: 'Fixed pace, fixed time' },
+  { label: 'Guj-Gyani',     emoji: '✦',  score: 100, color: '#FF6B00', hint: 'Adapts to YOU. Every question.' },
+]
+
+const VERSUS: {
+  rival: string
+  emoji: string
+  theirPain: string
+  ourWin: string
+}[] = [
+  {
+    rival: 'YouTube',
+    emoji: '▶️',
+    theirPain: 'You watch. You forget. No feedback.',
+    ourWin: 'You speak. You answer. We score every reply.',
+  },
+  {
+    rival: 'AI Chatbot',
+    emoji: '🤖',
+    theirPain: 'Generic answers. Zero memory of your level.',
+    ourWin: '5 skills tracked. 40 levels. A real curriculum.',
+  },
+  {
+    rival: 'Online Forums',
+    emoji: '💬',
+    theirPain: 'Wait hours. Get one opinion. Lose the thread.',
+    ourWin: 'Instant correction with the why behind it.',
+  },
+  {
+    rival: 'Offline Tuition',
+    emoji: '🏫',
+    theirPain: 'Fixed pace. Fixed time. Same lesson for everyone.',
+    ourWin: 'Your pace. Anytime. A lesson built for you.',
+  },
+]
+
 /** Large glyphs clipped — keeps watermark inside viewport */
 const WATERMARK = [
   { char: 'ગ', left: '6%', top: '10%', rotate: '-12deg' },
@@ -72,8 +124,7 @@ export default function LandingPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const v = parseInt(localStorage.getItem('gujgyani_streak') || '0', 10)
-    setStreak(Number.isFinite(v) ? v : 0)
+    setStreak(readStreakBadge())
   }, [])
 
   return (
@@ -184,6 +235,9 @@ export default function LandingPage() {
             >
               <Link href="/onboard" className="btn-primary text-sm sm:text-base">
                 Begin Journey →
+              </Link>
+              <Link href="/alphabet" className="btn-secondary text-sm sm:text-base">
+                Learn the letters · Kakko
               </Link>
               <a href="#features" className="btn-secondary text-sm sm:text-base">
                 See how it works ↓
@@ -322,6 +376,8 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <WhyBetterSection />
+
       <section className="relative z-10 mx-auto max-w-3xl px-4 py-14 text-center sm:px-6 md:py-20">
         <h2 className="text-2xl font-extrabold md:text-4xl">Ready to start?</h2>
         <p className="mt-3 text-[#5D3A1A] sm:text-lg">
@@ -337,9 +393,6 @@ export default function LandingPage() {
           <div>
             <div className="text-xl font-extrabold text-[#FF6B00]">Guj-Gyani</div>
             <p className="mt-1 text-sm font-medium text-[#5D3A1A]">Learn Gujarati the smart way</p>
-            <p className="mt-2 text-xs text-[#8D6E63] sm:text-sm">
-              Built at DJ Sanghvi COE · IPD 2025-26
-            </p>
           </div>
           <div className="flex flex-col gap-3 md:items-end md:text-right">
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm font-semibold text-[#5D3A1A]">
@@ -371,5 +424,329 @@ function Stat({ label, value }: { label: string; value: string }) {
         {label}
       </div>
     </div>
+  )
+}
+
+/* ===========================================================
+   WHY GUJ-GYANI WINS — presentation-grade comparison section
+   =========================================================== */
+function WhyBetterSection() {
+  const scoreboardRef = useRef<HTMLDivElement>(null)
+  const inView = useInView(scoreboardRef, { once: true, margin: '-15% 0px' })
+
+  return (
+    <section
+      id="why-better"
+      className="relative z-10 mx-auto w-full max-w-7xl min-w-0 px-4 py-20 sm:px-6 md:py-28"
+    >
+      {/* Heading */}
+      <div className="mx-auto max-w-4xl text-center">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.45 }}
+          className="inline-flex items-center gap-2 rounded-full border-2 border-[#FF6B00]/30 bg-white px-5 py-2 text-base font-extrabold uppercase tracking-[0.18em] text-[#FF6B00] shadow-sm sm:text-lg"
+        >
+          <span>The Showdown</span>
+        </motion.div>
+
+        <motion.h2
+          initial={{ opacity: 0, y: 16 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.05 }}
+          className="mt-6 text-[2.375rem] font-black leading-[1.03] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl"
+        >
+          Why <span className="text-gradient">Guj-Gyani</span>
+          <br />
+          beats every other way.
+        </motion.h2>
+
+        <motion.p
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.15 }}
+          className="mx-auto mt-7 max-w-2xl text-xl font-semibold leading-snug text-[#5D3A1A] sm:mt-8 sm:text-2xl md:max-w-3xl md:text-3xl"
+        >
+          We benchmarked four ways people learn a language.
+          <br className="hidden sm:block" />
+          One delivers. The rest leak time.
+        </motion.p>
+      </div>
+
+      {/* SCOREBOARD — the visual */}
+      <div
+        ref={scoreboardRef}
+        className="mx-auto mt-20 w-full max-w-4xl overflow-hidden rounded-3xl border-2 border-[#F5E6D0] bg-white p-8 shadow-[0_32px_64px_-32px_rgba(255,107,0,0.42)] sm:mt-24 sm:p-11 md:max-w-5xl md:p-14"
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+          <div>
+            <div className="text-base font-extrabold uppercase tracking-[0.22em] text-[#8D6E63] sm:text-lg md:text-xl">
+              Effectiveness Score
+            </div>
+            <div className="mt-2 text-[1.875rem] font-black leading-[1.05] sm:text-4xl md:text-5xl">
+              How far you actually get.
+            </div>
+          </div>
+          <div className="flex w-fit shrink-0 items-center gap-2.5 self-start rounded-full border border-[#FF6B00]/20 bg-gradient-to-r from-[#FFF8F0] to-[#FFF3E0] px-4 py-2 shadow-sm sm:self-auto sm:gap-3 sm:px-5 sm:py-2.5">
+            <span className="text-2xl sm:text-3xl">🏆</span>
+            <span className="text-base font-extrabold text-[#5D3A1A] sm:text-lg">
+              Higher = better
+            </span>
+          </div>
+        </div>
+
+        {/* Bars */}
+        <div className="mt-10 space-y-7 sm:mt-12 sm:space-y-8">
+          {SCORECARD.map((row, i) => {
+            const isUs = row.label === 'Guj-Gyani'
+            return (
+              <motion.div
+                key={row.label}
+                initial={{ opacity: 0, y: 14 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.07, duration: 0.45 }}
+                className={`grid grid-cols-[auto_1fr_auto] items-center gap-x-4 gap-y-1.5 sm:gap-x-6 md:gap-x-8 ${
+                  isUs
+                    ? 'rounded-2xl border border-[#FF6B00]/20 bg-gradient-to-r from-[#FFF8F0]/90 to-white py-3.5 pl-2 pr-1.5 sm:py-4 sm:pl-3 sm:pr-2.5'
+                    : ''
+                }`}
+              >
+                {/* Label */}
+                <div
+                  className={`flex shrink-0 items-center gap-3 sm:gap-4 ${
+                    isUs ? 'min-w-[170px] sm:min-w-[250px]' : 'min-w-[170px] sm:min-w-[250px]'
+                  }`}
+                >
+                  <div
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl text-xl shadow-sm sm:h-14 sm:w-14 sm:text-2xl md:h-16 md:w-16 md:text-3xl"
+                    style={{
+                      background: isUs ? `${row.color}1F` : '#FAFAFA',
+                      border: `2px solid ${isUs ? row.color : '#E0E0E0'}`,
+                    }}
+                  >
+                    <span>{row.emoji}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <div
+                      className={`leading-snug sm:leading-tight ${
+                        isUs
+                          ? 'text-xl font-extrabold sm:text-2xl md:text-3xl'
+                          : 'text-lg font-extrabold sm:text-xl md:text-2xl'
+                      } ${isUs ? 'text-[#1A0A00]' : 'text-[#5D3A1A]'}`}
+                    >
+                      {row.label}
+                      {isUs && (
+                        <span className="ml-2 hidden align-middle text-lg font-bold text-[#FF6B00] sm:inline md:text-xl">
+                          ← that&rsquo;s us
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 block text-sm font-medium leading-snug text-[#8D6E63] sm:text-base md:text-lg">
+                      {row.hint}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bar track */}
+                <div
+                  className="relative h-7 w-full overflow-hidden rounded-full bg-[#FFF3E0]/80 sm:h-9 md:h-11"
+                  style={{ border: '1px solid #F5E6D0' }}
+                >
+                  {/* Tick marks */}
+                  <div className="pointer-events-none absolute inset-0 flex">
+                    {[25, 50, 75].map((t) => (
+                      <div
+                        key={t}
+                        className="h-full border-r border-dashed border-[#F5E6D0]"
+                        style={{ width: `${t === 25 ? 25 : 25}%` }}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Filled bar */}
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={inView ? { width: `${row.score}%` } : { width: 0 }}
+                    transition={{
+                      duration: 1.1,
+                      delay: 0.2 + i * 0.12,
+                      ease: [0.22, 1, 0.36, 1],
+                    }}
+                    className="relative flex h-full items-center justify-end overflow-hidden rounded-full px-2 sm:px-3 md:px-4"
+                    style={{
+                      background: isUs
+                        ? `linear-gradient(90deg, ${row.color} 0%, #FFB300 100%)`
+                        : `linear-gradient(90deg, ${row.color}E6 0%, ${row.color} 100%)`,
+                      boxShadow: isUs
+                        ? '0 8px 24px -8px rgba(255,107,0,0.55)'
+                        : 'none',
+                    }}
+                  >
+                    {isUs && (
+                      <motion.div
+                        initial={{ x: '-120%' }}
+                        animate={inView ? { x: '120%' } : { x: '-120%' }}
+                        transition={{
+                          delay: 1.4,
+                          duration: 1.6,
+                          ease: 'easeOut',
+                          repeat: Infinity,
+                          repeatDelay: 2.4,
+                        }}
+                        className="pointer-events-none absolute inset-y-0 w-1/3"
+                        style={{
+                          background:
+                            'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%)',
+                        }}
+                      />
+                    )}
+                  </motion.div>
+                </div>
+
+                {/* Score */}
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.85 }}
+                  animate={inView ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.85 }}
+                  transition={{ delay: 1.1 + i * 0.12, duration: 0.4 }}
+                  className={`min-w-[4rem] text-right font-black tabular-nums sm:min-w-[4.75rem] md:min-w-[5.25rem] ${
+                    isUs
+                      ? 'text-[2.125rem] text-[#FF6B00] sm:text-5xl md:text-[2.85rem]'
+                      : 'text-[1.875rem] text-[#5D3A1A] sm:text-4xl md:text-[2.5rem]'
+                  }`}
+                >
+                  {row.score}
+                  <span className="text-base font-bold text-[#8D6E63] sm:text-lg md:text-xl">
+                    %
+                  </span>
+                </motion.div>
+              </motion.div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* VERSUS DUEL CARDS */}
+      <div className="mt-20 text-center">
+        <motion.h3
+          initial={{ opacity: 0, y: 12 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.45 }}
+          className="text-3xl font-black tracking-tight sm:text-4xl md:text-5xl"
+        >
+          Head-to-head.
+        </motion.h3>
+        <motion.p
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.1, duration: 0.45 }}
+          className="mt-3 text-lg text-[#5D3A1A] sm:text-xl md:text-2xl"
+        >
+          Same goal. Very different outcome.
+        </motion.p>
+      </div>
+
+      <div className="mt-12 grid gap-6 md:grid-cols-2 md:gap-8">
+        {VERSUS.map((v, i) => (
+          <VersusCard key={v.rival} v={v} index={i} />
+        ))}
+      </div>
+
+      {/* Closing big stat row */}
+      <div className="mt-16 grid grid-cols-2 gap-4 sm:gap-6 md:grid-cols-4">
+        {[
+          { big: '40', small: 'Levels of Mastery' },
+          { big: '5', small: 'Skills Tracked Live' },
+          { big: '∞', small: 'Replays + Retries' },
+          { big: '0₹', small: 'To Get Started' },
+        ].map((s, i) => (
+          <motion.div
+            key={s.small}
+            initial={{ opacity: 0, y: 14 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: i * 0.08, duration: 0.45 }}
+            className="rounded-2xl border-2 border-[#F5E6D0] bg-white p-5 text-center shadow-sm sm:p-7"
+          >
+            <div className="text-4xl font-black leading-none text-[#FF6B00] sm:text-5xl md:text-6xl">
+              {s.big}
+            </div>
+            <div className="mt-2 text-sm font-bold uppercase tracking-wider text-[#8D6E63] sm:text-base">
+              {s.small}
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function VersusCard({
+  v,
+  index,
+}: {
+  v: { rival: string; emoji: string; theirPain: string; ourWin: string }
+  index: number
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 24 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ delay: index * 0.08, duration: 0.5 }}
+      whileHover={{ y: -4 }}
+      className="group relative overflow-hidden rounded-3xl border-2 border-[#F5E6D0] bg-white p-6 shadow-[0_20px_40px_-24px_rgba(255,107,0,0.35)] sm:p-8 md:p-10"
+    >
+      {/* Decorative giant glyph */}
+      <div className="pointer-events-none absolute -right-6 -top-10 select-none text-[10rem] leading-none text-[#FF6B00]/[0.05] sm:-right-4 sm:-top-12 sm:text-[14rem] md:text-[18rem]">
+        {v.emoji}
+      </div>
+
+      <div className="relative grid items-center gap-5 sm:grid-cols-[1fr_auto_1fr] sm:gap-6">
+        {/* THEIR side */}
+        <div className="relative rounded-2xl border-2 border-[#E0E0E0] bg-[#FAFAFA] p-5 sm:p-6">
+          <div className="mb-3 flex items-center gap-3">
+            <span className="text-4xl sm:text-5xl">{v.emoji}</span>
+            <span className="text-xs font-extrabold uppercase tracking-[0.18em] text-[#8D6E63] sm:text-sm">
+              {v.rival}
+            </span>
+          </div>
+          <p className="text-base font-semibold leading-snug text-[#5D3A1A] line-through decoration-[#C62828]/60 decoration-2 sm:text-lg md:text-xl">
+            {v.theirPain}
+          </p>
+        </div>
+
+        {/* VS Badge */}
+        <div className="relative mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-[#FF6B00] to-[#E65100] text-base font-black text-white shadow-lg sm:h-16 sm:w-16 sm:text-lg">
+          <motion.span
+            animate={{ rotate: [0, -8, 8, -6, 6, 0] }}
+            transition={{ duration: 2.4, repeat: Infinity, repeatDelay: 1.2 }}
+          >
+            VS
+          </motion.span>
+        </div>
+
+        {/* OUR side */}
+        <div
+          className="relative rounded-2xl border-2 border-[#FF6B00] bg-gradient-to-br from-[#FFF8F0] to-[#FFF3E0] p-5 sm:p-6"
+          style={{ boxShadow: '0 14px 34px -16px rgba(255,107,0,0.45)' }}
+        >
+          <div className="mb-3 flex items-center gap-3">
+            <span className="text-4xl sm:text-5xl">✦</span>
+            <span className="text-xs font-extrabold uppercase tracking-[0.18em] text-[#FF6B00] sm:text-sm">
+              Guj-Gyani
+            </span>
+          </div>
+          <p className="text-base font-bold leading-snug text-[#1A0A00] sm:text-lg md:text-xl">
+            {v.ourWin}
+          </p>
+        </div>
+      </div>
+    </motion.div>
   )
 }

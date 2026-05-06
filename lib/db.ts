@@ -3,6 +3,20 @@ import path from 'path'
 
 let db: Database.Database | null = null
 
+function migrateUsers(database: Database.Database) {
+  const cols = database.prepare(`PRAGMA table_info(users)`).all() as { name: string }[]
+  const names = new Set(cols.map((c) => c.name))
+  if (!names.has('login_id')) {
+    database.exec(`ALTER TABLE users ADD COLUMN login_id TEXT`)
+  }
+  if (!names.has('password_hash')) {
+    database.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT`)
+  }
+  database.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_id_unique ON users(login_id) WHERE login_id IS NOT NULL AND login_id != ''`
+  )
+}
+
 export const getDb = (): Database.Database => {
   if (!db) {
     db = new Database(path.join(process.cwd(), 'gujgyani.db'))
@@ -53,6 +67,7 @@ export const getDb = (): Database.Database => {
         FOREIGN KEY (session_id) REFERENCES sessions(id)
       );
     `)
+    migrateUsers(db)
   }
   return db
 }

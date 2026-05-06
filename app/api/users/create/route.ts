@@ -1,24 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
-import crypto from 'crypto'
+import { NextResponse } from 'next/server'
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json()
-    const name = (body?.name ?? '').toString().trim()
-    if (!name) {
-      return NextResponse.json({ error: 'Name is required' }, { status: 400 })
-    }
-
-    const id = crypto.randomUUID()
-    const db = getDb()
-    db.prepare(
-      `INSERT INTO users (id, name, current_level) VALUES (?, ?, 0)`
-    ).run(id, name)
-
-    return NextResponse.json({ userId: id, name, currentLevel: 0 })
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'Unknown error'
-    return NextResponse.json({ error: msg }, { status: 500 })
-  }
+/** Password-less signup was removed — use POST /api/auth/register */
+export async function POST() {
+  return NextResponse.json(
+    {
+      error:
+        'Account creation now uses a user ID and password. Use Register on the sign-in page, or POST /api/auth/register.',
+    },
+    { status: 410 }
+  )
 }

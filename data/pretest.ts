@@ -251,7 +251,7 @@ export const hardPretest: TheoryQuestion[] = [
     id: 'PH_04',
     level: 0,
     type: 'theory',
-    question: 'Which is the correct past tense of "I went"?',
+    question: 'Which is the correct past tense of "I went" (masculine speaker)?',
     gujaratiText: 'હું ગયો / ગઈ / ગયું',
     options: [
       'હું જાઉં છું',

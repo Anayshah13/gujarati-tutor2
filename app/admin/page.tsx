@@ -15,6 +15,7 @@ import { motion } from 'framer-motion'
 import Spinner from '@/components/Spinner'
 import { useToast } from '@/components/Toast'
 import { getGameState, getXPLevel } from '@/lib/gamification'
+import { withCredentials } from '@/lib/apiClient'
 
 interface SessionRow {
   id: string
@@ -62,7 +63,7 @@ export default function AdminPage() {
 
   const load = (id: string) => {
     setLoading(true)
-    fetch(`/api/sessions/all?userId=${id}`)
+    fetch(`/api/sessions/all?userId=${id}`, withCredentials)
       .then((r) => r.json())
       .then((d) => setSessions(d?.sessions || []))
       .catch(() => setSessions([]))
@@ -123,7 +124,8 @@ export default function AdminPage() {
     )
     if (!confirmed) return
     try {
-      await fetch(`/api/users/${userId}`, { method: 'DELETE' })
+      await fetch(`/api/users/${userId}`, { method: 'DELETE', ...withCredentials })
+      await fetch('/api/auth/logout', { method: 'POST', ...withCredentials })
     } catch {
       /* ignore */
     }

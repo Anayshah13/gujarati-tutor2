@@ -1,6 +1,7 @@
 'use client'
 
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
+import gsap from 'gsap'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -8,7 +9,6 @@ import confetti from 'canvas-confetti'
 
 import Spinner from '@/components/Spinner'
 import SpeakButton from '@/components/SpeakButton'
-import ProgressBar from '@/components/ProgressBar'
 import LevelDisplay from '@/components/LevelDisplay'
 import SkillBars from '@/components/SkillBars'
 import QuestionCard from '@/components/QuestionCard'
@@ -34,6 +34,7 @@ import {
   recordAnswer,
   updateStreak,
 } from '@/lib/gamification'
+import { withCredentials } from '@/lib/apiClient'
 import { scorePronunciation, stopSpeaking } from '@/lib/speech'
 import {
   getQuestionByLevelAndType,
@@ -68,6 +69,15 @@ const QUESTION_TYPES: SkillKey[] = [
   'blanks',
 ]
 
+/** Matches the next /api/gemini/question body so prefetch can be reused. */
+function geminiQuestionPrefetchKey(
+  level: number,
+  type: SkillKey,
+  previousIds: string[]
+) {
+  return `${level}\t${type}\t${previousIds.join('\x1f')}`
+}
+
 export default function QuizPage() {
   const router = useRouter()
   const { show } = useToast()
@@ -90,11 +100,19 @@ export default function QuizPage() {
   const usedQuestionIds = useRef<string[]>([])
   const skillsStartRef = useRef<SkillScores | null>(null)
   const titleLevelStartRef = useRef(0)
+  const geminiPrefetchRef = useRef<{
+    key: string
+    promise: Promise<Question | null>
+  } | null>(null)
 
   const [combo, setCombo] = useState(0)
   const comboRef = useRef(0)
   const [sessionXp, setSessionXp] = useState(0)
   const [xpToast, setXpToast] = useState<number | null>(null)
+
+  const scoreBarFillRef = useRef<HTMLDivElement>(null)
+  const levelUpCardRef = useRef<HTMLDivElement>(null)
+  const reduceMotion = useReducedMotion()
 
   // ---- Bootstrap ----
   useEffect(() => {
@@ -104,7 +122,7 @@ export default function QuizPage() {
       router.replace('/onboard')
       return
     }
-    fetch(`/api/users/${id}`)
+    fetch(`/api/users/${id}`, withCredentials)
       .then((r) => r.json())
       .then((u: UserData) => {
         if (!u || !u.id) {
@@ -141,6 +159,7 @@ export default function QuizPage() {
         }
 
         fetch('/api/sessions/start', {
+          ...withCredentials,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: u.id, startLevel: startingLevel }),
@@ -167,11 +186,49 @@ export default function QuizPage() {
       .catch(() => router.replace('/onboard'))
   }, [router])
 
+  useEffect(() => {
+    const el = scoreBarFillRef.current
+    if (!el || !levelState) return
+    const pct = Math.max(0, Math.min(100, (levelState.score / 60) * 100))
+    if (reduceMotion) {
+      gsap.set(el, { width: `${pct}%` })
+      return
+    }
+    gsap.to(el, {
+      width: `${pct}%`,
+      duration: 0.55,
+      ease: 'power2.out',
+      overwrite: 'auto',
+    })
+  }, [levelState, reduceMotion])
+
+  useEffect(() => {
+    if (!showLevelUp || reduceMotion || !levelUpCardRef.current) return
+    const root = levelUpCardRef.current
+    const tl = gsap.timeline()
+    const emoji = root.querySelector('.level-up-emoji')
+    const title = root.querySelector('.level-up-title')
+    const sub = root.querySelector('.level-up-sub')
+    if (emoji) {
+      tl.from(emoji, { scale: 0, opacity: 0, duration: 0.38, ease: 'back.out(1.5)' })
+    }
+    if (title) {
+      tl.from(title, { y: 14, opacity: 0, duration: 0.32, ease: 'power2.out' }, '-=0.18')
+    }
+    if (sub) {
+      tl.from(sub, { y: 10, opacity: 0, duration: 0.28, ease: 'power2.out' }, '-=0.12')
+    }
+    return () => {
+      tl.kill()
+    }
+  }, [showLevelUp, reduceMotion])
+
   // ---- Persist skills/level on change (debounced via stable ref) ----
   const persistUserState = useCallback(
     (state: LevelState) => {
       if (!user) return
       fetch(`/api/users/${user.id}`, {
+        ...withCredentials,
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -202,6 +259,7 @@ export default function QuizPage() {
       // Fire-and-forget DB log
       if (sessionId) {
         fetch('/api/sessions/answer', {
+          ...withCredentials,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -247,8 +305,34 @@ export default function QuizPage() {
         )
       }
 
+      const willLevelUp = checkLevelUp(newState)
+      if (!willLevelUp && newState.hardcodedDone) {
+        const nextType = getNextQuestionType(newState, askedTypesThisLevel.current)
+        geminiPrefetchRef.current = {
+          key: geminiQuestionPrefetchKey(
+            newState.currentLevel,
+            nextType,
+            usedQuestionIds.current
+          ),
+          promise: fetch('/api/gemini/question', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              level: newState.currentLevel,
+              type: nextType,
+              previousIds: usedQuestionIds.current,
+            }),
+          })
+            .then((r) => r.json())
+            .then((data) => (data?.question as Question | null) ?? null)
+            .catch(() => null),
+        }
+      } else {
+        geminiPrefetchRef.current = null
+      }
+
       // Check level up
-      if (checkLevelUp(newState)) {
+      if (willLevelUp) {
         const leveled = applyLevelUp(newState)
         setLevelState(leveled)
         triggerLevelUp(leveled.currentLevel)
@@ -300,23 +384,34 @@ export default function QuizPage() {
         q = getRandomFallbackQuestion(state.currentLevel, nextType, usedQuestionIds.current)
       }
     } else {
-      // Try Gemini first; fallback to hardcoded fallback
-      try {
-        const res = await fetch('/api/gemini/question', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            level: state.currentLevel,
-            type: nextType,
-            previousIds: usedQuestionIds.current,
-          }),
-        })
-        const data = await res.json()
-        if (data?.question) {
-          q = data.question as Question
+      const prefetchKey = geminiQuestionPrefetchKey(
+        state.currentLevel,
+        nextType,
+        usedQuestionIds.current
+      )
+      const pending = geminiPrefetchRef.current
+      if (pending?.key === prefetchKey) {
+        geminiPrefetchRef.current = null
+        q = await pending.promise
+      }
+      if (!q) {
+        try {
+          const res = await fetch('/api/gemini/question', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              level: state.currentLevel,
+              type: nextType,
+              previousIds: usedQuestionIds.current,
+            }),
+          })
+          const data = await res.json()
+          if (data?.question) {
+            q = data.question as Question
+          }
+        } catch {
+          /* fall through */
         }
-      } catch {
-        /* fall through */
       }
       if (!q) {
         q = getRandomFallbackQuestion(state.currentLevel, nextType, usedQuestionIds.current)
@@ -344,6 +439,7 @@ export default function QuizPage() {
     if (sessionId) {
       try {
         await fetch('/api/sessions/end', {
+          ...withCredentials,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -379,6 +475,48 @@ export default function QuizPage() {
     router.push('/summary')
   }
 
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', ...withCredentials })
+    } catch {
+      /* ignore */
+    }
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('gujgyani_userId')
+      localStorage.removeItem('gujgyani_userName')
+    }
+    router.replace('/onboard')
+  }
+
+  const handleRetakePretest = async () => {
+    if (!user) return
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        'Go back to the placement test? Your unsaved session stays on this device until you end it.'
+      )
+    ) {
+      return
+    }
+    stopSpeaking()
+    try {
+      const res = await fetch(`/api/users/${user.id}`, {
+        ...withCredentials,
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pretest_done: 0 }),
+      })
+      if (!res.ok) {
+        show('Could not reset placement. Try signing out and back in.', 'error')
+        return
+      }
+    } catch {
+      show('Network error resetting placement.', 'error')
+      return
+    }
+    router.push('/pretest')
+  }
+
   if (!user || !levelState) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -392,7 +530,12 @@ export default function QuizPage() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* TOP BAR */}
-      <header className="sticky top-0 z-30 backdrop-blur-md bg-[#FFF8F0]/85 border-b border-[#F5E6D0]">
+      <motion.header
+        initial={reduceMotion ? false : { opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+        className="sticky top-0 z-30 backdrop-blur-md bg-[#FFF8F0]/85 border-b border-[#F5E6D0]"
+      >
         <div className="max-w-6xl mx-auto px-4 md:px-6 h-20 flex items-center justify-between gap-3">
           <Link
             href="/"
@@ -411,16 +554,44 @@ export default function QuizPage() {
               <div className="text-[10px] uppercase tracking-widest text-[#8D6E63] font-semibold mb-1">
                 Score · {levelState.score}/50+
               </div>
-              <ProgressBar
-                value={levelState.score}
-                max={60}
-                color="#FF6B00"
-                height={8}
-              />
+              <div
+                className="w-full bg-[#FFE5C9] rounded-full overflow-hidden"
+                style={{ height: 8 }}
+              >
+                <div
+                  ref={scoreBarFillRef}
+                  className="rounded-full"
+                  style={{
+                    background: '#FF6B00',
+                    height: 8,
+                    width: 0,
+                  }}
+                />
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            <span
+              className="hidden lg:inline text-xs font-medium text-[#8D6E63] max-w-[140px] truncate"
+              title={user.name}
+            >
+              {user.name}
+            </span>
+            <button
+              type="button"
+              onClick={handleRetakePretest}
+              className="text-xs font-semibold text-[#5D3A1A] hover:text-[#FF6B00] px-2 py-1 rounded whitespace-nowrap"
+            >
+              Retake placement
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="text-xs font-semibold text-[#8D6E63] hover:text-[#C62828] px-2 py-1 rounded whitespace-nowrap"
+            >
+              Log out
+            </button>
             {fade.showEnglishToggle && (
               <button
                 onClick={() => setShowEnglish((s) => !s)}
@@ -438,7 +609,7 @@ export default function QuizPage() {
             </button>
           </div>
         </div>
-      </header>
+      </motion.header>
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 md:px-6 py-6 grid lg:grid-cols-[1fr_280px] gap-6">
         <div className="relative min-h-[60vh]">
@@ -446,9 +617,10 @@ export default function QuizPage() {
             {xpToast !== null && (
               <motion.div
                 key={xpToast}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
+                initial={{ opacity: 0, y: 14, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 420, damping: 28 }}
                 className="pointer-events-none absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-full bg-[#FFB300]/95 px-4 py-2 text-sm font-bold text-[#1A0A00] shadow-lg"
               >
                 +{xpToast} XP
@@ -469,9 +641,10 @@ export default function QuizPage() {
             {loadingNext ? (
               <motion.div
                 key="loading"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
                 className="card p-10 max-w-2xl mx-auto flex flex-col items-center gap-4"
               >
                 <Spinner size={40} />
@@ -527,11 +700,12 @@ export default function QuizPage() {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 30 }}
               transition={{ type: 'spring', stiffness: 280, damping: 22 }}
+              ref={levelUpCardRef}
               className="card p-8 md:p-10 text-center max-w-md"
             >
-              <div className="text-5xl mb-3">🎉</div>
-              <div className="text-2xl font-extrabold mb-1">Level Up!</div>
-              <div className="text-[#5D3A1A]">
+              <div className="level-up-emoji text-5xl mb-3">🎉</div>
+              <div className="level-up-title text-2xl font-extrabold mb-1">Level Up!</div>
+              <div className="level-up-sub text-[#5D3A1A]">
                 You’re now at <span className="text-[#FF6B00] font-bold">Level {levelState.currentLevel}</span>
               </div>
             </motion.div>
@@ -624,6 +798,29 @@ function TheoryView({
 }) {
   const [picked, setPicked] = useState<string | null>(null)
   const [committed, setCommitted] = useState(false)
+  const reduceMotion = useReducedMotion()
+
+  const optionListVariants = useMemo(
+    () => ({
+      hidden: {},
+      visible: {
+        transition: { staggerChildren: 0.05, delayChildren: 0.07 },
+      },
+    }),
+    []
+  )
+
+  const optionItemVariants = useMemo(
+    () => ({
+      hidden: { opacity: 0, y: reduceMotion ? 0 : 6 },
+      visible: {
+        opacity: 1,
+        y: 0,
+        transition: { type: 'spring' as const, stiffness: 400, damping: 28 },
+      },
+    }),
+    [reduceMotion]
+  )
 
   const handlePick = (opt: string) => {
     if (picked) return
@@ -649,7 +846,12 @@ function TheoryView({
         <span className="gujarati text-[#1A0A00]">{q.gujaratiText}</span>
       </div>
 
-      <div className="grid sm:grid-cols-2 gap-3">
+      <motion.div
+        className="grid sm:grid-cols-2 gap-3"
+        variants={optionListVariants}
+        initial="hidden"
+        animate="visible"
+      >
         {q.options.map((opt) => {
           const isPicked = picked === opt
           const isCorrect = opt === q.answer
@@ -658,6 +860,7 @@ function TheoryView({
           return (
             <motion.button
               key={opt}
+              variants={optionItemVariants}
               whileHover={!picked ? { scale: 1.02 } : undefined}
               whileTap={!picked ? { scale: 0.97 } : undefined}
               onClick={() => handlePick(opt)}
@@ -676,7 +879,7 @@ function TheoryView({
             </motion.button>
           )
         })}
-      </div>
+      </motion.div>
 
       {picked && (
         <Explanation
@@ -707,6 +910,7 @@ function PronunciationView({
   const [retries, setRetries] = useState(0)
   const [committed, setCommitted] = useState(false)
   const [almost, setAlmost] = useState(false)
+  const reduceMotion = useReducedMotion()
 
   const handleCheck = () => {
     if (committed) return
@@ -749,13 +953,17 @@ function PronunciationView({
           autoPlay
           label="Tap to hear again"
         />
-        <div
+        <motion.div
+          key={showAnswer ? 'revealed' : 'hidden'}
+          initial={reduceMotion ? false : { opacity: 0.88, scale: 0.99 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
           className={`gujarati text-4xl text-[#1A0A00] transition-all ${
             !showAnswer ? 'blur-md select-none' : ''
           }`}
         >
           {q.gujaratiText}
-        </div>
+        </motion.div>
       </div>
 
       <input
@@ -852,14 +1060,19 @@ function SentenceView({
 
       {result ? (
         <>
-          <div className="mt-5 px-4 py-3 rounded-xl bg-[#FFF3E0] border border-[#F5E6D0]">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+            className="mt-5 px-4 py-3 rounded-xl bg-[#FFF3E0] border border-[#F5E6D0]"
+          >
             <div className="text-xs uppercase font-bold text-[#8D6E63] tracking-wider mb-1">
               Correct sentence
             </div>
             <div className="gujarati text-2xl text-[#1A0A00]">
               {q.gujaratiText}
             </div>
-          </div>
+          </motion.div>
           <Explanation
             correct={result === 'correct'}
             text={q.explanation}
@@ -942,6 +1155,7 @@ function BlanksView({
 }) {
   const [picked, setPicked] = useState<string | null>(null)
   const [committed, setCommitted] = useState(false)
+  const reduceMotion = useReducedMotion()
 
   const choices = useMemo(() => {
     const all = [q.answer, ...q.hints]
@@ -952,6 +1166,28 @@ function BlanksView({
     return all
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q.id])
+
+  const optionListVariants = useMemo(
+    () => ({
+      hidden: {},
+      visible: {
+        transition: { staggerChildren: 0.05, delayChildren: 0.07 },
+      },
+    }),
+    []
+  )
+
+  const optionItemVariants = useMemo(
+    () => ({
+      hidden: { opacity: 0, y: reduceMotion ? 0 : 6 },
+      visible: {
+        opacity: 1,
+        y: 0,
+        transition: { type: 'spring' as const, stiffness: 400, damping: 28 },
+      },
+    }),
+    [reduceMotion]
+  )
 
   const handlePick = (opt: string) => {
     if (picked) return
@@ -979,7 +1215,12 @@ function BlanksView({
         </div>
       </div>
 
-      <div className="grid sm:grid-cols-2 gap-3 mt-5">
+      <motion.div
+        className="grid sm:grid-cols-2 gap-3 mt-5"
+        variants={optionListVariants}
+        initial="hidden"
+        animate="visible"
+      >
         {choices.map((opt) => {
           const isPicked = picked === opt
           const isCorrect = opt === q.answer
@@ -988,6 +1229,7 @@ function BlanksView({
           return (
             <motion.button
               key={opt}
+              variants={optionItemVariants}
               whileHover={!picked ? { scale: 1.02 } : undefined}
               whileTap={!picked ? { scale: 0.97 } : undefined}
               onClick={() => handlePick(opt)}
@@ -1006,7 +1248,7 @@ function BlanksView({
             </motion.button>
           )
         })}
-      </div>
+      </motion.div>
 
       {picked && (
         <Explanation
@@ -1032,11 +1274,12 @@ function Explanation({
   onNext: () => void
   disabled: boolean
 }) {
+  const reduceMotion = useReducedMotion()
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
+      transition={{ duration: reduceMotion ? 0 : 0.3, ease: 'easeOut' }}
       className="mt-6"
     >
       <div
@@ -1051,9 +1294,17 @@ function Explanation({
         </div>
         <p className="text-sm font-medium">{text}</p>
       </div>
-      <button onClick={onNext} disabled={disabled} className="btn-primary w-full mt-4">
+      <motion.button
+        type="button"
+        onClick={onNext}
+        disabled={disabled}
+        whileHover={disabled || reduceMotion ? undefined : { scale: 1.01 }}
+        whileTap={disabled || reduceMotion ? undefined : { scale: 0.99 }}
+        transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+        className="btn-primary w-full mt-4"
+      >
         Next →
-      </button>
+      </motion.button>
     </motion.div>
   )
 }

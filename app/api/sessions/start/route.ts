@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { assertSessionMatchesUser } from '@/lib/authGate'
 import { getDb } from '@/lib/db'
 import crypto from 'crypto'
 
@@ -13,6 +14,9 @@ export async function POST(req: NextRequest) {
         { error: 'userId and startLevel are required' },
         { status: 400 }
       )
+    }
+    if (!assertSessionMatchesUser(req, userId)) {
+      return NextResponse.json({ error: 'Not authorized.' }, { status: 401 })
     }
     const id = crypto.randomUUID()
     const db = getDb()

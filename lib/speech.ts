@@ -1,6 +1,9 @@
 export type SpeechLang = 'en' | 'gu'
 
 let cachedVoices: SpeechSynthesisVoice[] = []
+let activeAudio: HTMLAudioElement | null = null
+
+type VoiceGender = 'male' | 'female'
 
 const loadVoices = (): Promise<SpeechSynthesisVoice[]> => {
   return new Promise((resolve) => {
@@ -31,46 +34,122 @@ export const speak = async (
   lang: SpeechLang = 'en'
 ): Promise<void> => {
   if (typeof window === 'undefined') return
-  if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
+  stopSpeaking()
 
-  const voices = await loadVoices()
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.rate = 0.85
-  utterance.pitch = 1.0
-  utterance.volume = 1.0
+  // Gemini TTS is a full round-trip per click; off by default for snappy UI.
+  // Set NEXT_PUBLIC_GEMINI_TTS=true to use Gemini audio first (then browser fallback).
+  const geminiTtsFirst = process.env.NEXT_PUBLIC_GEMINI_TTS === 'true'
 
-  if (lang === 'gu') {
-    const guVoice = voices.find((v) => v.lang === 'gu-IN')
-    const hiVoice = voices.find((v) => v.lang === 'hi-IN')
-    const enInVoice = voices.find((v) => v.lang === 'en-IN')
-    if (guVoice) {
-      utterance.voice = guVoice
-      utterance.lang = 'gu-IN'
-    } else if (hiVoice) {
-      utterance.voice = hiVoice
-      utterance.lang = 'hi-IN'
-    } else if (enInVoice) {
-      utterance.voice = enInVoice
-      utterance.lang = 'en-IN'
-    } else {
-      utterance.lang = 'en-US'
+  const preferredGender: VoiceGender = Math.random() < 0.5 ? 'male' : 'female'
+
+  const playGeminiAudio = async (): Promise<boolean> => {
+    if (!navigator.onLine) return false
+    try {
+      const res = await fetch('/api/gemini/speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, lang, preferredGender }),
+      })
+      if (!res.ok) return false
+      const data = (await res.json()) as {
+        audio?: { base64: string; mimeType?: string } | null
+      }
+      if (!data.audio?.base64) return false
+
+      const mime = data.audio.mimeType || 'audio/wav'
+      const audio = new Audio(`data:${mime};base64,${data.audio.base64}`)
+      activeAudio = audio
+
+      await new Promise<void>((resolve, reject) => {
+        audio.onended = () => resolve()
+        audio.onerror = () => reject(new Error('audio-playback-failed'))
+        audio
+          .play()
+          .then(() => {
+            // no-op, wait for onended
+          })
+          .catch(reject)
+      })
+      activeAudio = null
+      return true
+    } catch {
+      activeAudio = null
+      return false
     }
-  } else {
-    utterance.lang = 'en-US'
   }
 
-  return new Promise((resolve) => {
-    utterance.onend = () => resolve()
-    utterance.onerror = () => resolve()
-    window.speechSynthesis.speak(utterance)
-  })
+  const pickVoice = (
+    voices: SpeechSynthesisVoice[],
+    targetLangs: string[],
+    gender: VoiceGender
+  ): SpeechSynthesisVoice | undefined => {
+    const languageMatches = voices.filter((v) =>
+      targetLangs.some((target) => v.lang.toLowerCase().startsWith(target.toLowerCase()))
+    )
+    if (languageMatches.length === 0) return undefined
+
+    const maleHints = ['male', 'man', 'david', 'mark', 'alex', 'john', 'rahul']
+    const femaleHints = ['female', 'woman', 'zira', 'susan', 'sara', 'karen', 'priya']
+    const hints = gender === 'male' ? maleHints : femaleHints
+
+    const gendered = languageMatches.find((v) =>
+      hints.some((h) => v.name.toLowerCase().includes(h))
+    )
+    return gendered || languageMatches[0]
+  }
+
+  const playLocal = async (): Promise<void> => {
+    if (!('speechSynthesis' in window)) return
+    const voices = await loadVoices()
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.rate = 0.85
+    utterance.pitch = 1.0
+    utterance.volume = 1.0
+
+    if (lang === 'gu') {
+      const selected =
+        pickVoice(voices, ['gu-in'], preferredGender) ||
+        pickVoice(voices, ['hi-in'], preferredGender) ||
+        pickVoice(voices, ['en-in'], preferredGender)
+      if (selected) {
+        utterance.voice = selected
+        utterance.lang = selected.lang
+      } else {
+        utterance.lang = 'gu-IN'
+      }
+    } else {
+      const selected = pickVoice(voices, ['en-us', 'en-gb', 'en-in'], preferredGender)
+      if (selected) {
+        utterance.voice = selected
+        utterance.lang = selected.lang
+      } else {
+        utterance.lang = 'en-US'
+      }
+    }
+
+    await new Promise<void>((resolve) => {
+      utterance.onend = () => resolve()
+      utterance.onerror = () => resolve()
+      window.speechSynthesis.speak(utterance)
+    })
+  }
+
+  if (geminiTtsFirst) {
+    if (await playGeminiAudio()) return
+  }
+  await playLocal()
 }
 
 export const stopSpeaking = () => {
   if (typeof window === 'undefined') return
-  if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
+  if (activeAudio) {
+    activeAudio.pause()
+    activeAudio.currentTime = 0
+    activeAudio = null
+  }
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel()
+  }
 }
 
 export const scorePronunciation = (expected: string, got: string): number => {

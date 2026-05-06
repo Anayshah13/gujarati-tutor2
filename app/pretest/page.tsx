@@ -9,6 +9,7 @@ import SpeakButton from '@/components/SpeakButton'
 import ProgressBar from '@/components/ProgressBar'
 import { easyPretest, mediumPretest, hardPretest } from '@/data/pretest'
 import { calculatePretestLevel } from '@/lib/adaptiveEngine'
+import { withCredentials } from '@/lib/apiClient'
 import type { TheoryQuestion } from '@/data/types'
 
 type Mode = 'easy' | 'medium' | 'hard'
@@ -56,6 +57,7 @@ export default function PretestPage() {
   const [flash, setFlash] = useState<'correct' | 'wrong' | null>(null)
   const [calculating, setCalculating] = useState(false)
   const [resultLevel, setResultLevel] = useState<number | null>(null)
+  const [skipBusy, setSkipBusy] = useState(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -65,7 +67,7 @@ export default function PretestPage() {
       return
     }
     setUserId(id)
-    fetch(`/api/users/${id}`)
+    fetch(`/api/users/${id}`, withCredentials)
       .then((r) => r.json())
       .then((u) => {
         if (u?.pretest_done) {
@@ -101,6 +103,32 @@ export default function PretestPage() {
     }, 600)
   }
 
+  const skipPlacement = async () => {
+    if (!userId) return
+    setSkipBusy(true)
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        ...withCredentials,
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pretest_done: 1,
+          currentLevel: 1,
+          pretest_mode: 'skipped',
+        }),
+      })
+      if (!res.ok) {
+        window.alert('Could not save. Try logging out and signing in again.')
+        setSkipBusy(false)
+        return
+      }
+      router.push('/quiz')
+    } catch {
+      window.alert('Network error.')
+      setSkipBusy(false)
+    }
+  }
+
   const finishPretest = async () => {
     if (!userId || !mode) return
     setCalculating(true)
@@ -109,6 +137,7 @@ export default function PretestPage() {
     await new Promise((r) => setTimeout(r, 1500))
     try {
       await fetch(`/api/users/${userId}`, {
+        ...withCredentials,
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -158,7 +187,7 @@ export default function PretestPage() {
 
       <div className="flex-1 p-6 flex items-center justify-center">
         {!mode ? (
-          <ModePicker onPick={setMode} />
+          <ModePicker onPick={setMode} onSkip={skipPlacement} skipBusy={skipBusy} />
         ) : (
           <PretestQuestion
             mode={mode}
@@ -175,7 +204,15 @@ export default function PretestPage() {
   )
 }
 
-function ModePicker({ onPick }: { onPick: (m: Mode) => void }) {
+function ModePicker({
+  onPick,
+  onSkip,
+  skipBusy,
+}: {
+  onPick: (m: Mode) => void
+  onSkip: () => void
+  skipBusy: boolean
+}) {
   return (
     <div className="w-full max-w-4xl">
       <div className="text-center mb-10">
@@ -185,6 +222,14 @@ function ModePicker({ onPick }: { onPick: (m: Mode) => void }) {
         <p className="text-[#5D3A1A] text-lg">
           Pick the option that fits — we’ll fine-tune from there.
         </p>
+        <button
+          type="button"
+          disabled={skipBusy}
+          onClick={onSkip}
+          className="mt-5 text-sm font-semibold text-[#FF6B00] underline-offset-2 hover:underline disabled:opacity-50"
+        >
+          {skipBusy ? 'Saving…' : 'Skip placement — start at level 1'}
+        </button>
       </div>
       <div className="grid md:grid-cols-3 gap-4">
         {MODES.map((m, i) => (

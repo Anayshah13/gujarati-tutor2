@@ -1,6 +1,7 @@
 'use client'
 
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
+import { useMemo } from 'react'
 import type { SkillKey, SkillScores } from '@/lib/adaptiveEngine'
 
 const LABELS: Record<SkillKey, string> = {
@@ -31,8 +32,32 @@ const colorFor = (val: number, base: string) => {
 }
 
 export default function SkillBars({ skills, rescueSkill }: Props) {
+  const reduceMotion = useReducedMotion()
+  const rowVariants = useMemo(
+    () => ({
+      hidden: { opacity: 0, x: reduceMotion ? 0 : -8 },
+      visible: {
+        opacity: 1,
+        x: 0,
+        transition: { type: 'spring' as const, stiffness: 320, damping: 28 },
+      },
+    }),
+    [reduceMotion]
+  )
+  const listVariants = {
+    hidden: {},
+    visible: {
+      transition: { staggerChildren: 0.07, delayChildren: 0.04 },
+    },
+  }
+
   return (
-    <div className="card p-4 space-y-3">
+    <motion.div
+      className="card p-4 space-y-3"
+      variants={listVariants}
+      initial="hidden"
+      animate="visible"
+    >
       <div className="text-[11px] uppercase tracking-wider text-[#8D6E63] font-semibold mb-1">
         Skills
       </div>
@@ -41,7 +66,7 @@ export default function SkillBars({ skills, rescueSkill }: Props) {
         const isRescue = rescueSkill === k
         const barColor = colorFor(val, COLORS_BY_TYPE[k])
         return (
-          <div key={k} className="space-y-1">
+          <motion.div key={k} className="space-y-1" variants={rowVariants}>
             <div className="flex items-baseline justify-between text-xs">
               <span
                 className={`font-semibold ${
@@ -68,9 +93,9 @@ export default function SkillBars({ skills, rescueSkill }: Props) {
                 />
               )}
             </div>
-          </div>
+          </motion.div>
         )
       })}
-    </div>
+    </motion.div>
   )
 }

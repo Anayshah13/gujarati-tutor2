@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { assertSessionMatchesUser } from '@/lib/authGate'
 import { getDb } from '@/lib/db'
 
 export async function GET(req: NextRequest) {
@@ -7,6 +8,9 @@ export async function GET(req: NextRequest) {
     const userId = searchParams.get('userId')
     if (!userId) {
       return NextResponse.json({ error: 'userId required' }, { status: 400 })
+    }
+    if (!assertSessionMatchesUser(req, userId)) {
+      return NextResponse.json({ error: 'Not authorized.' }, { status: 401 })
     }
     const db = getDb()
     const rows = db

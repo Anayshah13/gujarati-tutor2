@@ -17,6 +17,7 @@ import {
 import Spinner from '@/components/Spinner'
 import type { SkillScores, SkillKey } from '@/lib/adaptiveEngine'
 import { endSession, getGameState, getXPLevel, type GameState } from '@/lib/gamification'
+import { withCredentials } from '@/lib/apiClient'
 
 interface LastSession {
   sessionId: string | null
@@ -134,7 +135,7 @@ export default function SummaryPage() {
     if (data.sessionId) {
       const userId = localStorage.getItem('gujgyani_userId')
       if (userId) {
-        fetch(`/api/sessions/all?userId=${userId}`)
+        fetch(`/api/sessions/all?userId=${userId}`, withCredentials)
           .then((r) => r.json())
           .then((d) => {
             const session = (d?.sessions || []).find(

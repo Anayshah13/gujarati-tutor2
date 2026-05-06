@@ -4,6 +4,17 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 // Override via GEMINI_MODEL env var if you want to pin to a specific version
 // (e.g. "gemini-2.5-flash", "gemini-2.0-flash", "gemini-3-flash-preview").
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest'
+// Single model by default — each extra entry is tried sequentially and slows failures.
+// Add fallbacks via GEMINI_TTS_MODELS=comma,separated,list if needed.
+const GEMINI_TTS_MODELS = (process.env.GEMINI_TTS_MODELS || 'gemini-2.5-flash-preview-tts')
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean)
+
+const GEMINI_TTS_VOICES = {
+  male: ['Puck', 'Fenrir', 'Orus', 'Charon'],
+  female: ['Kore', 'Leda', 'Aoede', 'Callirrhoe'],
+} as const
 
 const getClient = () => {
   const key = process.env.NEXT_PUBLIC_GEMINI_API_KEY
@@ -36,7 +47,14 @@ export const generateQuestion = async (
     return null
   }
 
-  const model = client.getGenerativeModel({ model: GEMINI_MODEL })
+  const model = client.getGenerativeModel({
+    model: GEMINI_MODEL,
+    generationConfig: {
+      temperature: 0.65,
+      maxOutputTokens: 1024,
+      responseMimeType: 'application/json',
+    },
+  })
 
   const bandDesc =
     level <= 10
@@ -175,7 +193,13 @@ export const generateInsight = async (
     logGeminiError('insight:init', e)
     return null
   }
-  const model = client.getGenerativeModel({ model: GEMINI_MODEL })
+  const model = client.getGenerativeModel({
+    model: GEMINI_MODEL,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 200,
+    },
+  })
   try {
     const result = await model.generateContent(
       `User completed a Gujarati learning session.
@@ -197,7 +221,133 @@ Be warm and encouraging. Keep total under 60 words.`
 }
 
 export const generateSpeech = async (
-  _text: string
-): Promise<string | null> => {
+  text: string,
+  opts?: { lang?: 'en' | 'gu'; preferredGender?: 'male' | 'female' }
+): Promise<{
+  audioBase64: string
+  mimeType: string
+  model: string
+  voice: string
+  gender: 'male' | 'female'
+} | null> => {
+  const key = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY
+  if (!key || key === 'your_key_here') {
+    logGeminiError('speech:init', 'Gemini API key not configured')
+    return null
+  }
+
+  const cleanText = text.trim()
+  if (!cleanText) return null
+
+  const gender: 'male' | 'female' =
+    opts?.preferredGender ?? (Math.random() < 0.5 ? 'male' : 'female')
+  const voicePool = GEMINI_TTS_VOICES[gender]
+  const voice = voicePool[Math.floor(Math.random() * voicePool.length)]
+
+  const languageInstruction =
+    opts?.lang === 'gu'
+      ? 'Speak naturally in Gujarati (gu-IN) with clear diction and neutral pace.'
+      : 'Speak naturally in English (en-US) with clear diction and neutral pace.'
+
+  const toWavBase64 = (pcmBase64: string, mimeType: string): string => {
+    if (mimeType.toLowerCase().includes('wav')) return pcmBase64
+    const pcm = Buffer.from(pcmBase64, 'base64')
+    const sampleRate = Number(mimeType.match(/rate=(\d+)/i)?.[1] ?? 24000)
+    const channels = Number(mimeType.match(/channels=(\d+)/i)?.[1] ?? 1)
+    const bitsPerSample = 16
+    const byteRate = (sampleRate * channels * bitsPerSample) / 8
+    const blockAlign = (channels * bitsPerSample) / 8
+    const dataSize = pcm.length
+    const wav = Buffer.alloc(44 + dataSize)
+
+    wav.write('RIFF', 0)
+    wav.writeUInt32LE(36 + dataSize, 4)
+    wav.write('WAVE', 8)
+    wav.write('fmt ', 12)
+    wav.writeUInt32LE(16, 16) // PCM chunk size
+    wav.writeUInt16LE(1, 20) // PCM format
+    wav.writeUInt16LE(channels, 22)
+    wav.writeUInt32LE(sampleRate, 24)
+    wav.writeUInt32LE(byteRate, 28)
+    wav.writeUInt16LE(blockAlign, 32)
+    wav.writeUInt16LE(bitsPerSample, 34)
+    wav.write('data', 36)
+    wav.writeUInt32LE(dataSize, 40)
+    pcm.copy(wav, 44)
+
+    return wav.toString('base64')
+  }
+
+  const tryModel = async (model: string) => {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent?key=${encodeURIComponent(key)}`
+
+    const body = {
+      contents: [
+        {
+          parts: [
+            {
+              text: `${languageInstruction}\n\nText to speak:\n${cleanText}`,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: voice,
+            },
+          },
+        },
+      },
+    }
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    })
+    const json = (await res.json()) as {
+      error?: { message?: string }
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }>
+        }
+      }>
+    }
+
+    if (!res.ok || json.error) {
+      const msg = json.error?.message || `HTTP ${res.status}`
+      throw new Error(msg)
+    }
+
+    const inline = json.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)?.inlineData
+    const data = inline?.data
+    if (!data) throw new Error('No audio returned from Gemini TTS')
+    const mimeType = inline?.mimeType || 'audio/L16;rate=24000'
+    const wavBase64 = toWavBase64(data, mimeType)
+
+    return {
+      audioBase64: wavBase64,
+      mimeType: 'audio/wav',
+      model,
+      voice,
+      gender,
+    }
+  }
+
+  for (const model of GEMINI_TTS_MODELS) {
+    try {
+      const out = await tryModel(model)
+      return out
+    } catch (e) {
+      logGeminiError(`speech:${model}`, e)
+    }
+  }
+
   return null
 }

@@ -21,6 +21,12 @@ Optional: pin a model (defaults to `gemini-flash-latest` in `lib/gemini.ts`):
 GEMINI_MODEL=gemini-2.5-flash
 ```
 
+Optional: configure Gemini TTS fallback model order (first successful model is used):
+
+```env
+GEMINI_TTS_MODELS=gemini-2.5-flash-preview-tts,gemini-3.1-flash-tts-preview
+```
+
 Restart the dev server after changing `.env.local`.
 
 ## Run

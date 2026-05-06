@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { assertSessionMatchesUser } from '@/lib/authGate'
 import { getDb } from '@/lib/db'
+import { toPublicUser } from '@/lib/toPublicUser'
 
 interface UserRow {
   id: string
@@ -27,7 +29,7 @@ export async function GET(
     if (!row) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
-    return NextResponse.json(row)
+    return NextResponse.json(toPublicUser(row))
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     return NextResponse.json({ error: msg }, { status: 500 })
@@ -53,6 +55,13 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!assertSessionMatchesUser(req, params.id)) {
+      return NextResponse.json(
+        { error: 'Sign in again to update your profile.' },
+        { status: 401 }
+      )
+    }
+
     const body = (await req.json()) as Record<string, unknown>
     const sets: string[] = []
     const values: unknown[] = []
@@ -81,7 +90,7 @@ export async function PATCH(
     const updated = db
       .prepare(`SELECT * FROM users WHERE id = ?`)
       .get(params.id) as UserRow | undefined
-    return NextResponse.json(updated ?? { ok: true })
+    return NextResponse.json(toPublicUser(updated) ?? { ok: true })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     return NextResponse.json({ error: msg }, { status: 500 })
@@ -89,10 +98,13 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!assertSessionMatchesUser(req, params.id)) {
+      return NextResponse.json({ error: 'Not authorized.' }, { status: 401 })
+    }
     const db = getDb()
     db.prepare(`DELETE FROM answers WHERE user_id = ?`).run(params.id)
     db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(params.id)
